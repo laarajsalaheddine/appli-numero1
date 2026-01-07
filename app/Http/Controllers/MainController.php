@@ -3,177 +3,286 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use function PHPUnit\Framework\isNumeric;
 
 class MainController extends Controller
 {
-    function readCSVData()
+    // ===== Constants (CSV) =====
+    private const CSV_REL_PATH = 'app/data/products-data.csv'; // storage/app/data/products-data.csv
+    private const CSV_DELIMITER = ',';
+    private const CSV_ENCLOSURE = '"';
+    private const CSV_ESCAPE = ''; // tu utilisais '' => on garde le même comportement
+
+    private const HEADERS = [
+        'id',
+        'name',
+        'description',
+        'category',
+        'price',
+        'currency',
+        'stock',
+        'color',
+        'size',
+        'availability',
+    ];
+
+    // ===== Constants (Views/Routes) =====
+    private const VIEW_HOME = 'home';
+    private const VIEW_LIST = 'Productlist';
+    private const VIEW_CREATE = 'ProductCreate';
+    private const VIEW_EDIT = 'ProductEdit';
+
+    private const ROUTE_LIST = 'afficher-liste';
+
+    // ===== CSV: Read =====
+    public function readCSVData(): array
     {
+        $fileContent = [];
+
         try {
-            $fileContent = [];
-            $filePath = storage_path('app/data/products-data.csv');
-            if (file_exists($filePath)) {
-                $myFile = fopen($filePath, "r");
-                $i = 0;
-                while (($row = fgetcsv($myFile, 1000, ",")) !== FALSE) {
-                    if ($i == 0) {
-                        $i++;
-                        continue;
-                    }
-                    array_push($fileContent, [
-                        "id" => $row[0],
-                        "name" => $row[1],
-                        "description" => $row[2],
-                        "category" => $row[3],
-                        "price" => $row[4],
-                        "currency" => $row[5],
-                        "stock" => $row[6],
-                        "color" => $row[7],
-                        "size" => $row[8],
-                        "availability" => $row[9],
-                    ]);
-                    $i++;
-                }
-                fclose($myFile);
+            $filePath = storage_path(self::CSV_REL_PATH);
+
+            if (!file_exists($filePath)) {
+                return [];
             }
-        } catch (\Exception $e) {
-            dd("An error occurred while reading the CSV file: " . $e->getMessage());
+
+            $myFile = fopen($filePath, 'r');
+            if ($myFile === false) {
+                return [];
+            }
+
+            $i = 0;
+            while (($row = fgetcsv($myFile, 1000, self::CSV_DELIMITER)) !== false) {
+                // Skip header
+                if ($i === 0) {
+                    $i++;
+                    continue;
+                }
+
+                // Pad row to avoid undefined offsets
+                $row = array_pad($row, count(self::HEADERS), '');
+
+                $fileContent[] = $this->normalizeProduct([
+                    'id'           => $row[0],
+                    'name'         => $row[1],
+                    'description'  => $row[2],
+                    'category'     => $row[3],
+                    'price'        => $row[4],
+                    'currency'     => $row[5],
+                    'stock'        => $row[6],
+                    'color'        => $row[7],
+                    'size'         => $row[8],
+                    'availability' => $row[9],
+                ]);
+
+                $i++;
+            }
+
+            fclose($myFile);
+        } catch (\Throwable $e) {
+            // Pour TP: tu peux logger au lieu de dd
+            // logger()->error("CSV read error: ".$e->getMessage());
+            return [];
         }
+
         return $fileContent;
     }
 
-    function writeCSVData($productData)
+    // ===== CSV: Write =====
+    public function writeCSVData(array $productData): void
     {
-        $filePath = storage_path('app/data/products-data.csv');
-        if (file_exists($filePath)) {
-            $myFile = fopen($filePath, "w");
-            fputcsv($myFile, ["id", "name", "description", "category", "price", "currency", "stock", "color", "size", "availability"], ',', '"', '');
-            foreach ($productData as $line) {
-                fputcsv($myFile, $line, ',', '"', '');
-            }
-            fclose($myFile);
+        $filePath = storage_path(self::CSV_REL_PATH);
+
+        // On garde la même logique "file_exists" (comme ton code)
+        if (!file_exists($filePath)) {
+            return;
         }
+
+        $myFile = fopen($filePath, 'w');
+        if ($myFile === false) {
+            return;
+        }
+
+        // Header
+        fputcsv($myFile, self::HEADERS, self::CSV_DELIMITER, self::CSV_ENCLOSURE, self::CSV_ESCAPE);
+
+        // Rows: on force l'ordre des colonnes
+        foreach ($productData as $p) {
+            $p = $this->normalizeProduct($p);
+
+            $line = [];
+            foreach (self::HEADERS as $key) {
+                $line[] = $p[$key] ?? '';
+            }
+
+            fputcsv($myFile, $line, self::CSV_DELIMITER, self::CSV_ENCLOSURE, self::CSV_ESCAPE);
+        }
+
+        fclose($myFile);
     }
 
-    //Créer une representation du produit
-    // function createRepOfProduct($fileContent)
-    // {
-    //     $output = [];
-    //     foreach ($fileContent as $value) {
-    //         $output[] = [
-    //             "id" => $value['id'],
-    //             "name" => $value['name'],
-    //             "price" => $value['price'],
-    //             "stock" => $value['stock'],
-    //             "availability" => $value['availability'],
-    //         ];
-    //     }
-    //     return $output;
-    // }
-
-    // afficher la page d'accueil
-    function index()
+    // ===== Helpers =====
+    private function normalizeProduct(array $p): array
     {
-        return view('home');
+        return [
+            'id'           => trim((string)($p['id'] ?? '')),
+            'name'         => trim((string)($p['name'] ?? '')),
+            'description'  => trim((string)($p['description'] ?? '')),
+            'category'     => trim((string)($p['category'] ?? '')),
+            'price'        => ($p['price'] ?? '') === '' ? 0 : (float)$p['price'],
+            'currency'     => trim((string)($p['currency'] ?? '')),
+            'stock'        => ($p['stock'] ?? '') === '' ? 0 : (int)$p['stock'],
+            'color'        => trim((string)($p['color'] ?? '')),
+            'size'         => trim((string)($p['size'] ?? '')),
+            'availability' => trim((string)($p['availability'] ?? '')),
+        ];
     }
 
-    // afficher la liste des produits
-    function show()
+    private function findIndexById(array $products, string $id): ?int
     {
-        // $products = $this->createRepOfProduct($this->readCSVData());
+        foreach ($products as $i => $p) {
+            if ((string)($p['id'] ?? '') === (string)$id) {
+                return $i;
+            }
+        }
+        return null;
+    }
+
+    private function generateId(): string
+    {
+        // ID alphanum unique, simple pour TP
+        return strtoupper(bin2hex(random_bytes(4))); // ex: 8 chars hex
+    }
+
+    // ===== Actions (defined/completed) =====
+
+    // Home
+    public function index()
+    {
+        return view(self::VIEW_HOME);
+    }
+
+    // List
+    public function show()
+    {
         $products = $this->readCSVData();
-        // dd($products);
-        return view('Productlist', ["products" => $products]);
+        return view(self::VIEW_LIST, ['products' => $products]);
     }
 
-    function delete($id)
+    // Create form
+    public function create()
+    {
+        return view(self::VIEW_CREATE);
+    }
+
+    // Store new product
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'name'         => ['required', 'string', 'max:255'],
+            'description'  => ['nullable', 'string'],
+            'category'     => ['nullable', 'string', 'max:255'],
+            'price'        => ['required', 'numeric', 'min:0'],
+            'currency'     => ['required', 'string', 'max:10'],
+            'stock'        => ['required', 'integer', 'min:0'],
+            'color'        => ['nullable', 'string', 'max:50'],
+            'size'         => ['nullable', 'string', 'max:50'],
+            'availability' => ['required', 'string', 'max:50'],
+        ]);
+
+        $products = $this->readCSVData();
+
+        $newProduct = $this->normalizeProduct(array_merge($validated, [
+            'id' => $this->generateId(),
+        ]));
+
+        $products[] = $newProduct;
+
+        $this->writeCSVData($products);
+
+        return redirect()
+            ->route(self::ROUTE_LIST)
+            ->with('success', 'Product created successfully.');
+    }
+
+    // Delete
+    public function delete($id)
     {
         try {
             $products = $this->readCSVData();
-            $newProducts = array_filter($products, function ($product) use ($id) {
-                return $product['id'] != $id;
-            });
-            $this->writeCSVData($newProducts);
-            return redirect()->route('afficher-liste')->with('success', 'Product deleted successfully.');
-            // le code ci-après  va passer mais ce n'est pas la bonne façon de faire
-            // return view('Productlist', ["products" => $newProducts])->with('success', 'Product deleted successfully.');
 
-        } catch (\Exception $e) {
-            return redirect()->route('afficher-liste')->with('error', 'An error occurred while deleting the product: ' . $e->getMessage());
-            // le code ci-après  va passer mais ce n'est pas la bonne façon de faire
-            // return view('Productlist', ["products" => $newProducts])->with('error', 'An error occurred while deleting the product: ' . $e->getMessage());
+            $index = $this->findIndexById($products, (string)$id);
+            if ($index === null) {
+                return redirect()
+                    ->route(self::ROUTE_LIST)
+                    ->with('error', 'Produit introuvable.');
+            }
+
+            unset($products[$index]);
+
+            // Re-indexation pour éviter des trous
+            $products = array_values($products);
+
+            $this->writeCSVData($products);
+
+            return redirect()
+                ->route(self::ROUTE_LIST)
+                ->with('success', 'Product deleted successfully.');
+        } catch (\Throwable $e) {
+            return redirect()
+                ->route(self::ROUTE_LIST)
+                ->with('error', 'An error occurred while deleting the product: ' . $e->getMessage());
+        }
+    }
+
+    // Edit form
+    public function edit($id)
+    {
+        $products = $this->readCSVData();
+
+        $index = $this->findIndexById($products, (string)$id);
+        if ($index === null) {
+            return redirect()
+                ->route(self::ROUTE_LIST)
+                ->with('error', 'Produit introuvable.');
         }
 
+        return view(self::VIEW_EDIT, [
+            'product' => $products[$index],
+        ]);
     }
 
-    function edit($id)
+    // Update
+    public function update(Request $request, $id)
     {
-       // À implémenter : afficher un formulaire pour éditer le produit avec l'ID donné
-       /*
-            1. Lire les données du CSV
-            2. Trouver le produit avec l'ID donné
-            3. Passer les données du produit à une vue d'édition
-            4. La vue d'édition affichera un formulaire pré-rempli avec les données
-       */
+        $validated = $request->validate([
+            'name'         => ['required', 'string', 'max:255'],
+            'description'  => ['nullable', 'string'],
+            'category'     => ['nullable', 'string', 'max:255'],
+            'price'        => ['required', 'numeric', 'min:0'],
+            'currency'     => ['required', 'string', 'max:10'],
+            'stock'        => ['required', 'integer', 'min:0'],
+            'color'        => ['nullable', 'string', 'max:50'],
+            'size'         => ['nullable', 'string', 'max:50'],
+            'availability' => ['required', 'string', 'max:50'],
+        ]);
+
+        $products = $this->readCSVData();
+
+        $index = $this->findIndexById($products, (string)$id);
+        if ($index === null) {
+            return redirect()
+                ->route(self::ROUTE_LIST)
+                ->with('error', 'Produit introuvable.');
+        }
+
+        $products[$index] = $this->normalizeProduct(array_merge($products[$index], $validated, [
+            'id' => (string)$id, // on conserve l’ID
+        ]));
+
+        $this->writeCSVData($products);
+
+        return redirect()
+            ->route(self::ROUTE_LIST)
+            ->with('success', 'Produit modifié avec succès.');
     }
-
-
-    // function indexFrWithDay($day)
-    // {
-    //     try {
-    //         $dayMapping = [
-    //             "1" => "Lundi",
-    //             "2" => "Mardi",
-    //             "3" => "Mercredi",
-    //             "4" => "Jeudi",
-    //             "5" => "Vendredi",
-    //             "6" => "Samedi",
-    //             "7" => "Dimanche"
-    //         ];
-    //         $textToDisplay = "Bonjour, aujourd'hui c'est ";
-    //         if (!in_array("" . $day, ["1", "2", "3", "4", "5", "6", "7"])) {
-    //             throw new \Exception("Le jour doit être entre 1 et 7 ou un nom de jour valide.");
-    //         } elseif (isNumeric($day)) {
-    //             $textToDisplay .= $dayMapping[$day];
-    //         } elseif (gettype($day) === "string" && in_array(ucfirst(strtolower($day)), $dayMapping)) {
-    //             $textToDisplay .= ucfirst(strtolower($day));
-    //         }
-    //     } catch (\Exception $e) {
-    //         $textToDisplay = "Paramètre de jour invalide : " . $e->getMessage();
-    //     }
-
-    //     return view('home', ["textToDisplay" => $textToDisplay]);
-    // }
-
-
-
-    //  function indexEnWithDay($day)
-    // {
-    //     try {
-    //         $dayMapping = [
-    //             "1" => "Monday",
-    //             "2" => "Tuesday",
-    //             "3" => "Wednesday",
-    //             "4" => "Thursday",
-    //             "5" => "Friday",
-    //             "6" => "Saturday",
-    //             "7" => "Sunday"
-    //         ];
-
-    //         $textToDisplay = "Hello, today is ";
-    //         if (!in_array("" . $day, ["1", "2", "3", "4", "5", "6", "7"])) {
-    //             throw new \Exception("Day must be between 1 and 7 or a valid day name.");
-    //         } elseif (isNumeric($day)) {
-    //             $textToDisplay .= $dayMapping[$day];
-    //         } elseif (gettype($day) === "string" && in_array(ucfirst(strtolower($day)), $dayMapping)) {
-    //             $textToDisplay .= ucfirst(strtolower($day));
-    //         }
-    //     } catch (\Exception $e) {
-    //         $textToDisplay = "Invalid day parameter: " . $e->getMessage();
-    //     }
-
-    //     return view('home', ["textToDisplay" => $textToDisplay]);
-    // }
-
-
 }
